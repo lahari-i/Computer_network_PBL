@@ -27,7 +27,7 @@ USER_LOCATIONS = {}   # sid -> user data
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
 # IMPORTANT: eventlet async mode for WebSockets
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="asgi")
 
 
 # -----------------------
@@ -166,8 +166,6 @@ def handle_message(msg):
 # START SERVER
 # -----------------------
 if __name__ == "__main__":
-    import eventlet
-    import eventlet.wsgi
-
     print(f"Running on port {PORT}")
     socketio.run(app, host=HOST, port=PORT)
+
