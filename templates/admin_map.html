@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Event Map - Admin Control</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body, html { margin: 0; padding: 0; height: 100%; font-family: 'Inter', sans-serif; background-color: #f8f9fa; }
+        #app-container { display: flex; flex-direction: column; height: 100vh; }
+        nav { display: flex; background-color: #fff; padding: 0 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); z-index: 1000; }
+        nav button { padding: 15px 20px; border: none; background: none; cursor: pointer; font-size: 1rem; font-weight: 500; color: #6c757d; border-bottom: 3px solid transparent; transition: color 0.3s, border-color 0.3s; }
+        nav button:hover { color: #007bff; }
+        nav button.active { color: #007bff; border-bottom-color: #007bff; }
+        main { flex-grow: 1; position: relative; }
+        .view { position: absolute; top: 0; left: 0; width: 100%; height: 100%; visibility: hidden; opacity: 0; transition: opacity 0.3s, visibility 0.3s; }
+        .view.active { visibility: visible; opacity: 1; }
+        #map-control-view { display: flex; }
+        #map { flex-grow: 1; }
+        #sidebar { width: 320px; padding: 20px; background: #fff; overflow-y: auto; box-shadow: -4px 0 10px rgba(0,0,0,0.05); border-left: 1px solid #e9ecef; }
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 5px; font-weight: 500; color: #495057; }
+        input[type="text"], input[type="number"] { width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 8px; box-sizing: border-box; transition: border-color 0.3s, box-shadow 0.3s; }
+        button { padding: 12px 18px; border: none; border-radius: 8px; color: white; cursor: pointer; font-weight: 500; transition: transform 0.2s, box-shadow 0.2s; }
+        .btn-save { background: #28a745; }
+        .btn-delete { background: #dc3545; }
+        button:hover { transform: translateY(-2px); }
+        #dashboard-view { padding: 25px; overflow-y: auto; box-sizing: border-box; }
+        .dashboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: min-content; gap: 25px; }
+        .dashboard-card { background: #fff; border-radius: 16px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .card-full-width { grid-column: 1 / -1; } /* Span full width */
+        .dashboard-card h3 { margin-top: 0; color: #343a40; border-bottom: 1px solid #e9ecef; padding-bottom: 10px; }
+        .plot-container { display: flex; justify-content: center; align-items: center; min-height: 400px; }
+        .plot-container img { max-width: 100%; max-height: 400px; object-fit: contain; }
+        #user-table-container { max-height: 400px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #dee2e6; }
+        th { background-color: #f8f9fa; font-weight: 500; }
+        @media (max-width: 1200px) { .dashboard-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 768px) { .dashboard-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <nav>
+            <button id="nav-map-control" class="active">Map Control</button>
+            <button id="nav-dashboard">Dashboard</button>
+            <button onclick="window.open('visualizer.html', '_blank')">Visualizer</button>
+
+        </nav>
+        <main>
+            <div id="map-control-view" class="view active">
+                <div id="map"></div>
+                <div id="sidebar">
+                    <h3>Zone Editor</h3>
+                    <p>Click map to place a zone, or click a zone to edit.</p>
+                    <div id="zone-form" style="display:none;">
+                        <input type="hidden" id="zone-id"><input type="hidden" id="zone-lat"><input type="hidden" id="zone-lon">
+                        <div class="form-group"><label for="zone-name">Zone Name</label><input type="text" id="zone-name"></div>
+                        <div class="form-group"><label for="zone-threshold">Crowd Threshold</label><input type="number" id="zone-threshold"></div>
+                        <div class="form-group"><label for="zone-radius">Radius (meters)</label><input type="number" id="zone-radius"></div>
+                        <button id="save-btn" class="btn-save">Save</button><button id="delete-btn" class="btn-delete">Delete</button>
+                    </div>
+                </div>
+            </div>
+            <div id="dashboard-view" class="view">
+                <div class="dashboard-grid">
+                    <div class="dashboard-card card-full-width">
+                        <h3>Zone Hotspots (Seaborn)</h3>
+                        <div class="plot-container"><img id="heatmap-image" alt="Loading heatmap..."></div>
+                    </div>
+                    <div class="dashboard-card">
+                        <h3>Device Count per Zone (Matplotlib)</h3>
+                        <div class="plot-container"><img id="bar-chart-image" alt="Loading bar chart..."></div>
+                    </div>
+                    <div class="dashboard-card">
+                        <h3>Crowd Distribution (Matplotlib)</h3>
+                        <div class="plot-container"><img id="pie-chart-image" alt="Loading pie chart..."></div>
+                    </div>
+                    <div class="dashboard-card">
+                        <h3>Live User Connections</h3>
+                        <div id="user-table-container">
+                           <table><thead><tr><th>Client ID</th><th>Connected Since</th></tr></thead><tbody id="user-table-body"></tbody></table>
+                        </div>
+                    </div>
+                     <div class="dashboard-card">
+                        <h3>Networking: TCP</h3>
+                        <div class="plot-container"><img id="tcp-concept-image" alt="Loading TCP diagram..."></div>
+                    </div>
+                     <div class="dashboard-card">
+                        <h3>Networking: UDP</h3>
+                        <div class="plot-container"><img id="udp-concept-image" alt="Loading UDP diagram..."></div>
+                    </div>
+                     <div class="dashboard-card">
+                        <h3>Why TCP for this App?</h3>
+                        <div class="plot-container"><img id="app-choice-image" alt="Loading explanation..."></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- include Socket.IO client (CDN) -->
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script>
+        const views = document.querySelectorAll('.view');
+        const navButtons = document.querySelectorAll('nav button');
+        const zoneForm = document.getElementById('zone-form');
+        const zoneIdInput = document.getElementById('zone-id'), zoneLatInput = document.getElementById('zone-lat'), zoneLonInput = document.getElementById('zone-lon');
+        const zoneNameInput = document.getElementById('zone-name'), zoneThresholdInput = document.getElementById('zone-threshold'), zoneRadiusInput = document.getElementById('zone-radius');
+        const userTableBody = document.getElementById('user-table-body');
+        const heatmapImage = document.getElementById('heatmap-image');
+        const pieChartImage = document.getElementById('pie-chart-image');
+        const barChartImage = document.getElementById('bar-chart-image');
+        const tcpConceptImage = document.getElementById('tcp-concept-image');
+        const udpConceptImage = document.getElementById('udp-concept-image');
+        const appChoiceImage = document.getElementById('app-choice-image');
+        
+        let zoneLayers = {}, userLayers = {}, mainMap, plotInterval;
+        let initialLoad = true;
+        
+        const createTileLayer = (url, attr) => L.tileLayer(url, { attribution: attr, maxZoom: 21 });
+        const baseMaps = { "Streets": createTileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', '&copy; OpenStreetMap'), "Satellite": createTileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', '&copy; Esri') };
+
+        function fitMapToBounds(mapInstance, zones) {
+            const zoneArray = Object.values(zones);
+            if (!mapInstance || zoneArray.length === 0) return;
+            mapInstance.fitBounds(L.latLngBounds(zoneArray.map(z => [z.lat, z.lon])).pad(0.2));
+        }
+        
+        function initMainMap() {
+            mainMap = L.map('map', { center: [20.5937, 78.9629], zoom: 5, layers: [baseMaps.Streets] });
+            L.control.layers(baseMaps, null, { position: 'topright' }).addTo(mainMap);
+            mainMap.on('click', onMapClick);
+        }
+
+        navButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                navButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                views.forEach(view => view.classList.remove('active'));
+                document.getElementById(btn.id.replace('nav-', '') + '-view').classList.add('active');
+
+                if (btn.id === 'nav-map-control' && mainMap) mainMap.invalidateSize();
+                if (btn.id === 'nav-dashboard') {
+                    if (plotInterval) clearInterval(plotInterval);
+                    plotInterval = setInterval(() => sendMessage({ type: 'request_plots' }), 5000);
+                    sendMessage({ type: 'request_plots' });
+                } else {
+                    clearInterval(plotInterval);
+                }
+            });
+        });
+
+        // Socket.IO client (keeps same message structure: {type, payload})
+        const socket = io();
+
+        // Helper to accept either string or object messages
+        function parsePayload(ev){
+            if(typeof ev === 'string') {
+                try { return JSON.parse(ev); } catch(e){ return ev; }
+            }
+            return ev;
+        }
+
+        // When you want to "send" (previously ws.send(JSON.stringify({...})))
+        function sendMessage(obj){
+            socket.emit('message', obj); // server expects {type, payload}
+        }
+
+        // Listen for generic 'message' events (e.g. login_success, plots_update)
+        socket.on('message', (ev) => {
+            const d = parsePayload(ev);
+            if(!d) return;
+            if (d.type === 'plots_update'){
+                const p = d.payload || {};
+                if (p.heatmap) heatmapImage.src = `data:image/png;base64,${p.heatmap}`;
+                if (p.pie_chart) pieChartImage.src = `data:image/png;base64,${p.pie_chart}`;
+                if (p.bar_chart) barChartImage.src = `data:image/png;base64,${p.bar_chart}`;
+                if (p.tcp_concept) tcpConceptImage.src = `data:image/png;base64,${p.tcp_concept}`;
+                if (p.udp_concept) udpConceptImage.src = `data:image/png;base64,${p.udp_concept}`;
+                if (p.app_choice) appChoiceImage.src = `data:image/png;base64,${p.app_choice}`;
+            } else if (d.type === 'login_success'){
+                // not expected here but handle gracefully
+                sessionStorage.setItem('role', d.payload.role);
+            } else {
+                console.log('message:', d);
+            }
+        });
+
+        // Listen for state updates (separate event)
+        socket.on('state_update', (payload) => {
+            const { zones, users } = payload || {};
+            updateAdminMap(zones || {}, users || {});
+            updateUserTable(users || {});
+            if (initialLoad) { fitMapToBounds(mainMap, zones || {}); initialLoad = false; }
+        });
+
+        // Login when socket connects
+        socket.on('connect', () => {
+            sendMessage({ type: 'login', payload: { email: 'admin@event.com', password: 'admin' } });
+        });
+
+        function updateAdminMap(zones, users) {
+            if(!mainMap) return;
+            Object.values(zoneLayers).forEach(l => mainMap.removeLayer(l));
+            Object.values(userLayers).forEach(l => mainMap.removeLayer(l));
+            zoneLayers = {}; userLayers = {};
+            for (const [zoneId, zone] of Object.entries(zones)) {
+                const color = zone.is_crowded ? '#dc3545' : '#28a745';
+                const circle = L.circle([zone.lat, zone.lon], { color, fillColor: color, fillOpacity: 0.4, radius: zone.radius }).addTo(mainMap);
+                circle.bindPopup(`<b>${zone.name}</b>`).on('click', () => populateForm(zoneId, zone));
+                zoneLayers[zoneId] = circle;
+            }
+            for (const [userId, user] of Object.entries(users)) {
+                if (user.lat && user.lon) userLayers[userId] = L.circleMarker([user.lat, user.lon], { radius: 6, color: '#fff', weight: 2, fillColor: '#007bff', fillOpacity: 1 }).addTo(mainMap);
+            }
+        }
+        
+        function updateUserTable(users) {
+            userTableBody.innerHTML = ''; 
+            const sorted = Object.entries(users).sort((a, b) => new Date(b[1].connected_at) - new Date(a[1].connected_at));
+            for (const [userId, user] of sorted) {
+                const row = document.createElement('tr');
+                const time = new Date(user.connected_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+                row.innerHTML = `<td><code>${userId.substring(0, 8)}...</code></td><td>${time}</td>`;
+                userTableBody.appendChild(row);
+            }
+        }
+        
+        function onMapClick(e) {
+            zoneIdInput.value = ''; zoneLatInput.value = e.latlng.lat.toFixed(6); zoneLonInput.value = e.latlng.lng.toFixed(6);
+            zoneNameInput.value = ''; zoneThresholdInput.value = '10'; zoneRadiusInput.value = '50';
+            zoneForm.style.display = 'block'; document.getElementById('delete-btn').style.display = 'none';
+        }
+
+        function populateForm(id, zone) {
+            zoneIdInput.value = id; zoneLatInput.value = zone.lat; zoneLonInput.value = zone.lon;
+            zoneNameInput.value = zone.name; zoneThresholdInput.value = zone.threshold; zoneRadiusInput.value = zone.radius;
+            zoneForm.style.display = 'block'; document.getElementById('delete-btn').style.display = 'inline-block';
+        }
+
+        document.getElementById('save-btn').addEventListener('click', () => {
+            const isNew = !zoneIdInput.value;
+            const payload = { name: zoneNameInput.value, threshold: parseInt(zoneThresholdInput.value), radius: parseInt(zoneRadiusInput.value) };
+            if(isNew) { payload.lat = parseFloat(zoneLatInput.value); payload.lon = parseFloat(zoneLonInput.value); } 
+            else { payload.id = zoneIdInput.value; }
+            ws.send(JSON.stringify({ type: isNew ? 'create_zone' : 'update_zone', payload }));
+            zoneForm.style.display = 'none';
+        });
+
+        document.getElementById('delete-btn').addEventListener('click', () => {
+            if (confirm('Are you sure?')) {
+                ws.send(JSON.stringify({ type: 'delete_zone', payload: { id: zoneIdInput.value } }));
+                zoneForm.style.display = 'none';
+            }
+        });
+
+        initMainMap();
+    </script>
+</body>
+</html>
+
+

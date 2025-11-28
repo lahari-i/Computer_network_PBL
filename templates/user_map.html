@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Event Map - User View</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body, html { padding: 0; margin: 0; height: 100%; width: 100%; font-family: 'Inter', sans-serif; }
+        #map { height: 100%; width: 100%; background: #f0f2f5; }
+        .leaflet-popup-content-wrapper { border-radius: 12px; }
+        .leaflet-popup-content b { color: #007bff; }
+
+        /* --- NEW: Notification Styles --- */
+        #notification-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        .notification {
+            background-color: #fff;
+            color: #333;
+            padding: 15px 20px;
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            transform: translateX(120%);
+            opacity: 0;
+            transition: transform 0.5s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.5s ease;
+            border-left: 5px solid #dc3545; /* Red for alert */
+            min-width: 250px;
+            max-width: 350px;
+        }
+        .notification.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        .notification strong {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="notification-container"></div> <!-- NEW: Container for popups -->
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- include Socket.IO client (CDN) -->
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script>
+        // --- Map Layer Definitions ---
+        const streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 21 });
+        const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 21 });
+        const dark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; CARTO', maxZoom: 21 });
+        
+        // --- Map Initialization ---
+        const map = L.map('map', {
+            center: [20.5937, 78.9629], // Default center of India
+            zoom: 5,
+            layers: [streets],
+            zoomControl: false
+        });
+        
+        L.control.zoom({ position: 'topright' }).addTo(map);
+        const baseMaps = { "Streets": streets, "Satellite": satellite, "Dark Mode": dark };
+        L.control.layers(baseMaps, null, { position: 'topright', collapsed: false }).addTo(map);
+
+        let userMarker;
+        const zoneLayers = {};
+        let initialLoad = true;
+        let zoneCrowdedStatus = {}; // NEW: Tracks the crowded state of zones to detect changes
+        // Socket.IO client
+        const socket = io();
+
+        function parsePayload(ev){
+            if(typeof ev === 'string') {
+                try { return JSON.parse(ev); } catch(e){ return ev; }
+            }
+            return ev;
+        }
+
+        function sendMessage(obj){ socket.emit('message', obj); }
+
+        socket.on('connect', () => {
+            sendMessage({ type: 'login', payload: { email: 'user', password: 'user' } });
+        });
+
+        socket.on('message', (ev) => {
+            const data = parsePayload(ev);
+            if (!data) return;
+            // other generic messages can be handled here
+            console.log('message:', data);
+        });
+
+        socket.on('state_update', (payload) => {
+            updateMap(payload);
+        });
+
+        // --- NEW: Notification Function ---
+        function showNotification(message) {
+            const container = document.getElementById('notification-container');
+            const notif = document.createElement('div');
+            notif.className = 'notification';
+            notif.innerHTML = message;
+            container.appendChild(notif);
+
+            // Use a short delay to allow the element to be added to the DOM before transitioning
+            setTimeout(() => {
+                notif.classList.add('show');
+            }, 10);
+
+            // Automatically remove after 5 seconds
+            setTimeout(() => {
+                notif.classList.remove('show');
+                // Remove from DOM after transition ends
+                notif.addEventListener('transitionend', () => notif.remove());
+            }, 5000);
+        }
+
+        // --- Geolocation ---
+        navigator.geolocation.watchPosition((position) => {
+            const { latitude, longitude } = position.coords;
+            
+            if (userMarker) {
+                userMarker.setLatLng([latitude, longitude]);
+            } else {
+                userMarker = L.circleMarker([latitude, longitude], {
+                    radius: 8, color: '#fff', weight: 2, fillColor: '#007bff', fillOpacity: 1
+                }).addTo(map).bindPopup("<b>You are here</b>");
+                if (!initialLoad) {
+                    map.setView([latitude, longitude], 18);
+                }
+            }
+            
+            if (socket && socket.connected) {
+                sendMessage({ type: 'location_update', payload: { lat: latitude, lon: longitude } });
+            }
+        }, () => {
+            alert("Could not get your location. Please enable location services.");
+        }, { enableHighAccuracy: true });
+
+        // --- Map Update Function ---
+        function updateMap(state) {
+            Object.values(zoneLayers).forEach(layer => map.removeLayer(layer));
+            
+            const zones = state.zones;
+            for (const zoneId in zones) {
+                const zone = zones[zoneId];
+                const color = zone.is_crowded ? '#dc3545' : '#28a745';
+                const circle = L.circle([zone.lat, zone.lon], { color, fillColor: color, fillOpacity: 0.3, radius: zone.radius }).addTo(map);
+                const popupContent = `<b>${zone.name}</b><br><b>Status:</b> ${zone.is_crowded ? 'Crowded' : 'Normal'}`;
+                circle.bindPopup(popupContent);
+                zoneLayers[zoneId] = circle;
+
+                // --- NEW: Notification Logic ---
+                const wasCrowded = zoneCrowdedStatus[zoneId] || false;
+                const isNowCrowded = zone.is_crowded;
+
+                if (isNowCrowded && !wasCrowded) {
+                    // Trigger notification only when the state changes from not crowded to crowded
+                    showNotification(`<strong>Alert:</strong> Zone '<strong>${zone.name}</strong>' is now crowded!`);
+                }
+                
+                // Update the status for the next check
+                zoneCrowdedStatus[zoneId] = isNowCrowded;
+            }
+
+            // Auto-center the map on the first data load
+            if (initialLoad && Object.keys(zones).length > 0) {
+                const bounds = L.latLngBounds(Object.values(zones).map(z => [z.lat, z.lon]));
+                map.fitBounds(bounds.pad(0.2));
+                initialLoad = false;
+            }
+        }
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Crowd Monitor - Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f2f5;
+        }
+        .login-container {
+            padding: 2.5rem 3rem;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            width: 90%;
+            max-width: 400px;
+        }
+        h2 {
+            color: #333;
+            margin-bottom: 2rem;
+            font-weight: 700;
+        }
+        .input-group {
+            margin-bottom: 1.5rem;
+            text-align: left;
+        }
+        input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            box-sizing: border-box;
+            font-size: 1rem;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            background-image: linear-gradient(to right, #007bff, #0056b3);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px rgba(0, 123, 255, 0.2);
+        }
+        #error {
+            color: #dc3545;
+            margin-top: 1rem;
+            height: 1em;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h2>Event Crowd Monitor</h2>
+        <form id="loginForm">
+            <div class="input-group">
+                <input type="email" id="email" placeholder="Email Address" required>
+            </div>
+            <div class="input-group">
+                <input type="password" id="password" placeholder="Password" required>
+            </div>
+            <button type="submit">Login</button>
+            <p id="error"></p>
+        </form>
+    </div>
+
+    <!-- include Socket.IO client (CDN) -->
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script>
+        const loginForm = document.getElementById('loginForm');
+        const errorMsg = document.getElementById('error');
+
+        // Socket.IO client
+        const socket = io();
+
+        function parsePayload(ev){
+            if(typeof ev === 'string') {
+                try { return JSON.parse(ev); } catch(e){ return ev; }
+            }
+            return ev;
+        }
+
+        function sendMessage(obj){ socket.emit('message', obj); }
+
+        socket.on('message', (ev) => {
+            const data = parsePayload(ev);
+            if (!data) return;
+            if (data.type === 'login_success') {
+                sessionStorage.setItem('crowdMonitorRole', data.payload.role);
+                sessionStorage.setItem('crowdMonitorClientId', data.payload.clientId);
+                window.location.href = (data.payload.role === 'admin') ? 'admin_map.html' : 'user_map.html';
+            } else {
+                errorMsg.textContent = 'Login failed. Please try again.';
+            }
+        });
+
+        socket.on('connect_error', () => { errorMsg.textContent = 'Could not connect to the server.'; });
+
+        loginForm.addEventListener('submit', (event) => {
+            event.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            sendMessage({ type: 'login', payload: { email, password } });
+        });
+    </script>
+</body>
+</html>
